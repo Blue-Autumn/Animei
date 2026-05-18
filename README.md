@@ -34,6 +34,9 @@ cd animei
 - ⚠️ 切记：你的上色记录保存在浏览器的 localStorage 中，如果移动或删除文件夹，之前的数据不会丢（数据在浏览器里，不在文件夹里）
 - 以后想更新新版本，需要重新下载 ZIP 覆盖，但注意备份 localStorage 数据
 
+
+
+
 ### 2. 安装 Node.js
 
 前往 https://nodejs.org/ 下载 **LTS 版本**（长期支持版），安装时一路点"下一步"即可。
@@ -42,6 +45,9 @@ cd animei
 ```bash
 node --version   # 能看到版本号就说明装好了
 ```
+
+
+
 
 ### 3. 安装 pnpm
 
@@ -55,24 +61,67 @@ npm install -g pnpm
 pnpm --version   # 能看到版本号就行
 ```
 
+
+
+
 ### 4. 安装依赖 & 启动
 
-在项目文件夹里打开终端，执行：
+在项目文件夹里打开终端(在根目录，右键空白处，点击“在终端打开”)，执行：
 ```bash
 pnpm install
 pnpm dev
 ```
-
 浏览器会自动打开 http://localhost:3000，开始上色吧！ 🎉
-
 > 💡 以后每次使用时，在项目文件夹打开终端，只需执行 `pnpm dev` 即可启动，不需要重复 `pnpm install`。
 
-### 构建部署
 
+
+如果想体验手机、iPad也查看网页，
+首先所有设备连接到同一个wifi
+
+电脑上执行
 ```bash
-pnpm build      # 产物输出到 dist/
-pnpm preview    # 本地预览构建结果
+pnpm dev --host 0.0.0.0
 ```
+
+会弹出来：
+```bash
+PS E:\Desktop\Project_Base\animei> pnpm dev --host 0.0.0.0
+
+> animei@1.0.0 dev E:\Desktop\Project_Base\animei
+> vite "--host" "0.0.0.0"
+  VITE v5.4.21  ready in 374 ms
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://192.***.***.***:3000/
+  ➜  Network: http://192.***.***.***:3000/
+  ➜  Network: http://192.***.***.***:3000/
+  ➜  press h + enter to show help
+```
+说明成功了，浏览器应该会自动弹出窗户
+别担心，--host 0.0.0.0只是让同一个 WiFi 下的设备（比如你的手机、平板）能访问，并不会暴露到互联网。
+
+然后
+```bash
+ipconfig
+```
+获取本机ip地址
+
+例如：
+```bash
+PS C:\Users\*****> ipconfig
+Windows IP 配置
+无线局域网适配器 WLAN:
+   连接特定的 DNS 后缀 . . . . . . . :
+   本地链接 IPv6 地址. . . . . . . . : fe80::****:****:****:****
+   IPv4 地址 . . . . . . . . . . . . : 11.4.31.100      ←注意这个
+   子网掩码  . . . . . . . . . . . . : 255.255.240.0
+   默认网关. . . . . . . . . . . . . : ***.***.***.***
+```
+
+最后手机访问
+[电脑ip]+:3000
+
+例如：11.4.31.100:3000
 
 ##  数据说明
 
