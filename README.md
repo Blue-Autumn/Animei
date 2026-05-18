@@ -1,4 +1,10 @@
 # Animei 
+|   |
+| ------------ |
+|<img  src="./year1.png"> 特写|
+|<img  src="./year.png"> 年份|
+|<img  src="./month.png"> 月份|
+
 
 **动漫电影记录年历** — 像 GitHub 贡献图一样，用色彩标记你观看动漫/电影的每一天。
 
