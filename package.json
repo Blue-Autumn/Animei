@@ -1,0 +1,27 @@
+{
+  "name": "animei",
+  "version": "1.0.0",
+  "description": "动漫电影记录年历",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "anime",
+    "calendar",
+    "movie"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.18.1",
+  "dependencies": {
+    "esbuild": "^0.28.0",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}
