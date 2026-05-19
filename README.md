@@ -77,6 +77,10 @@ pnpm --version   # 能看到版本号就行
 pnpm install
 pnpm dev
 ```
+另外打开一个终端
+```bash
+pnpm dev:all
+```
 浏览器会自动打开 http://localhost:3000，开始上色吧！ 🎉
 > 💡 以后每次使用时，在项目文件夹打开终端，只需执行 `pnpm dev` 即可启动，不需要重复 `pnpm install`。
 
@@ -88,6 +92,10 @@ pnpm dev
 电脑上执行
 ```bash
 pnpm dev --host 0.0.0.0
+```
+另外打开一个终端
+```bash
+pnpm dev:all --host 0.0.0.0
 ```
 
 会弹出来：
