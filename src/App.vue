@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <!-- Top toolbar (responsive: single flex-wrap flow) -->
-    <nav class="top-bar">
+    <nav class="top-bar" :style="{ marginRight: sidePanelOpen ? sidePanelWidth + '%' : '0' }">
       <!-- Logo -->
       <div class="bar-left">
         <span class="logo">Animei</span>
@@ -56,8 +56,6 @@
         @redo="redo"
       />
 
-      <!-- Settings -->
-      <button class="bar-btn settings-btn" @click="showSettings = true" title="⚙">⚙</button>
       <!-- Side panel toggle -->
       <button
         class="bar-btn panel-btn"
@@ -68,7 +66,7 @@
     </nav>
 
     <!-- Status info -->
-    <div class="status-bar">
+    <div class="status-bar" :style="{ marginRight: sidePanelOpen ? sidePanelWidth + '%' : '0' }">
       <span v-if="brushActive && brushColor !== null" class="status-hint">
         {{ t('status.brushActive', { mode: overwriteMode ? t('status.overwrite') : t('status.add') }) }}
       </span>
@@ -222,18 +220,22 @@
     <SidePanel
       :open="sidePanelOpen"
       :panel-width="sidePanelWidth"
+      :settings="settings"
+      :timelines="timelines"
+      :current-doc-id="currentDocId"
+      :is-dirty="isDirty"
+      :current-doc-name="getCurrentDocName()"
+      :color-count="Object.keys(colors).length"
       @update:panel-width="sidePanelWidth = $event"
       @resize-start="onSideResizeStart"
       @resize-end="onSideResizeEnd"
-    />
-
-    <!-- Settings Dialog -->
-    <SettingsDialog
-      :visible="showSettings"
-      :settings="settings"
-      @apply="onSettingsApply"
-      @cancel="onSettingsCancel"
+      @update-settings="onSettingsUpdate"
       @recalc-auto="computeAutoCellSize"
+      @new-timeline="doNewTimeline"
+      @save-as-new="onSaveAsNew"
+      @save="doSave"
+      @load-timeline="doLoadTimeline"
+      @delete-timeline="doDeleteTimeline"
     />
   </div>
 </template>
@@ -243,11 +245,18 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import WeekGrid from './components/WeekGrid.vue'
 import MonthGrid from './components/MonthGrid.vue'
 import BrushToolbar from './components/BrushToolbar.vue'
-import SettingsDialog from './components/SettingsDialog.vue'
 import SidePanel from './components/SidePanel.vue'
-import { loadColors, setColor, setColors } from './utils/storage.js'
+import { loadColors, setColor, setColors, saveColors } from './utils/storage.js'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './utils/settings.js'
-import { THEMES, getTheme } from './utils/themes.js'
+import { themes, getTheme } from './utils/paletteStore.js'
+import {
+  loadTimelines,
+  createTimeline,
+  updateTimeline,
+  deleteTimeline,
+  renameTimeline,
+  getTimeline
+} from './utils/timelineStore.js'
 import { useI18n } from './locales/index.js'
 
 const { t, setLocale } = useI18n()
@@ -259,7 +268,7 @@ const currentYearRef = ref(null)
 
 // ── Side panel 真实挤压 ──
 const sidePanelOpen = ref(false)
-const sidePanelWidth = ref(50)
+const sidePanelWidth = ref(25)
 const isStoneMode = ref(false)
 let stoneTimer = null
 
@@ -340,6 +349,7 @@ function undo() {
   }))
   colors.value = setColors(colors.value, updates)
   redoStack.value.push(cmd)
+  isDirty.value = true
 }
 
 function redo() {
@@ -351,10 +361,10 @@ function redo() {
   }))
   colors.value = setColors(colors.value, updates)
   undoStack.value.push(cmd)
+  isDirty.value = true
 }
 
 // ── Theme ──
-const themes = THEMES
 const currentTheme = ref(0)
 const themeColors = computed(() => getTheme(currentTheme.value).colors)
 
@@ -363,7 +373,6 @@ const colors = ref(loadColors())
 
 // ── Settings ──
 const settings = ref(loadSettings())
-const showSettings = ref(false)
 
 // 从设置初始化 viewMode
 viewMode.value = settings.value.viewMode ?? 'year'
@@ -502,24 +511,19 @@ function scrollToYear(year, block = 'start') {
   }
 }
 
-// ── Settings handlers ──
-function onSettingsApply(newSettings) {
-  settings.value = { ...settings.value, ...newSettings }
+// ── Settings handler (from side panel) ──
+function onSettingsUpdate(partial) {
+  settings.value = { ...settings.value, ...partial }
   saveSettings(settings.value)
 
-  if (newSettings.locale) {
-    setLocale(newSettings.locale)
+  if (partial.locale) {
+    setLocale(partial.locale)
   }
 
   if (currentYear.value < startYear.value) currentYear.value = startYear.value
   if (currentYear.value > endYear.value) currentYear.value = endYear.value
 
-  showSettings.value = false
   nextTick(computeAutoCellSize)
-}
-
-function onSettingsCancel() {
-  showSettings.value = false
 }
 
 // ── Brush ──
@@ -538,6 +542,83 @@ function onSetTheme(themeIndex) {
   saveSettings(settings.value)
 }
 
+// ── Timeline (多时间表管理) ──
+const timelines = ref(loadTimelines())
+const currentDocId = ref(null)   // 当前关联的存档ID，null=未关联
+const isDirty = ref(false)      // 是否有未保存修改
+
+// 注意：isDirty 不在这里自动设为 true；改为在 onColorDate / onPaintBatch 中手动设置
+// 可防止加载存档/新建时异步 watch 覆盖掉 isDirty = false
+
+function getCurrentDocName() {
+  if (!currentDocId.value) return '未命名时间表'
+  const doc = getTimeline(currentDocId.value)
+  return doc ? doc.name : '未命名时间表'
+}
+
+function refreshTimelines() {
+  timelines.value = loadTimelines()
+}
+
+// 新建时间表（清空画布）
+function doNewTimeline() {
+  colors.value = {}
+  saveColors(colors.value)
+  currentDocId.value = null
+  isDirty.value = false
+  undoStack.value = []
+  redoStack.value = []
+  refreshTimelines()
+}
+
+// 从当前新建存档
+function doSaveAsNew(name) {
+  const doc = createTimeline(name, colors.value)
+  currentDocId.value = doc.id
+  isDirty.value = false
+  refreshTimelines()
+  return doc
+}
+
+// 保存到当前关联存档
+function doSave() {
+  if (!currentDocId.value) return false
+  updateTimeline(currentDocId.value, colors.value)
+  isDirty.value = false
+  refreshTimelines()
+  return true
+}
+
+// 加载存档
+function doLoadTimeline(id) {
+  const doc = getTimeline(id)
+  if (!doc) return
+  colors.value = { ...doc.colors }
+  saveColors(colors.value)
+  currentDocId.value = doc.id
+  isDirty.value = false
+  undoStack.value = []
+  redoStack.value = []
+}
+
+// 删除存档
+function doDeleteTimeline(id) {
+  const isCurrent = id === currentDocId.value
+  deleteTimeline(id)
+  refreshTimelines()
+  if (isCurrent) {
+    currentDocId.value = null
+    isDirty.value = true   // 画布保留但解除关联 → 标记未保存
+  }
+}
+
+// ── 侧边栏时间表操作事件 ──
+function onNewTimeline()       { doNewTimeline() }
+function onSaveAsNew(name)     { doSaveAsNew(name) }
+function onSave()              { doSave() }
+function onLoadTimeline(id)    { doLoadTimeline(id) }
+function onDeleteTimeline(id)  { doDeleteTimeline(id) }
+
 // ── Color events ──
 function onSelectDate({ dateStr }) {
   // Click handling reserved for future use
@@ -545,11 +626,13 @@ function onSelectDate({ dateStr }) {
 
 function onColorDate(dateStr, colorIndices) {
   colors.value = setColor(colors.value, dateStr, colorIndices)
+  isDirty.value = true  // 用户实际涂色 → 标记未保存
 }
 
 function onPaintBatch(batch) {
   if (!batch || batch.length === 0) return
   pushUndo(batch)
+  isDirty.value = true  // 用户实际涂色 → 标记未保存
 }
 
 // ── Keyboard shortcuts ──
@@ -566,14 +649,14 @@ function onKeydown(e) {
     redo()
     return
   }
-  if (e.key === 'b' && !e.ctrlKey && !e.metaKey) {
-    toggleBrush()
+  if (e.ctrlKey && e.key === 's') {
+    e.preventDefault()
+    doSave()
     return
   }
 
-  if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    e.preventDefault()
-    showSettings.value = !showSettings.value
+  if (e.key === 'b' && !e.ctrlKey && !e.metaKey) {
+    toggleBrush()
     return
   }
 
@@ -754,11 +837,6 @@ body {
   background: rgba(52, 152, 219, 0.15);
   border-color: rgba(52, 152, 219, 0.4);
   color: #3498db;
-}
-
-.settings-btn {
-  font-size: 14px;
-  padding: 4px 8px;
 }
 
 .panel-btn {

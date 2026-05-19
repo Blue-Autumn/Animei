@@ -74,7 +74,7 @@ export default {
   'settings.sideBlur': '侧边栏模糊',
 
   // ===== 快捷键提示（设置底部） =====
-  'settings.shortcuts': '快捷键: B 笔刷开关 | S 设置 | 1234567890-= 选色',
+  'settings.shortcuts': '快捷键: B 笔刷开关 | 1234567890-= 选色',
 
   // ===== 日期单元格提示 =====
   'cell.tooltip': '{dateStr} · 颜色: {colors}',

@@ -74,7 +74,7 @@ export default {
   'settings.sideBlur': 'Side Panel Blur',
 
   // ===== Shortcuts hint (Settings bottom) =====
-  'settings.shortcuts': 'Shortcuts: B Brush | S Settings | 1234567890-= Colors & Clear',
+  'settings.shortcuts': 'Shortcuts: B Brush | 1234567890-= Colors & Clear',
 
   // ===== Cell tooltip =====
   'cell.tooltip': '{dateStr} · Colors: {colors}',
