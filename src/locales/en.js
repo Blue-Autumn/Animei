@@ -73,6 +73,18 @@ export default {
   // ===== Side panel =====
   'settings.sideBlur': 'Side Panel Blur',
 
+  // ===== Identity / Device =====
+  'settings.identity': 'Device Name',
+  'settings.identityReset': 'Reset',
+  'settings.identityResetTitle': 'Reset Identity',
+  'settings.identityResetMsg': 'This will generate a new device ID. Cloud data will not be lost, but you will need to re-associate. Continue?',
+  'settings.identityResetDone': 'Identity reset',
+
+  // ===== Cloud polling =====
+  'settings.pollInterval': 'Cloud Refresh Interval',
+  'settings.pollIntervalUnit': 's',
+  'settings.pollEvery': 'Every {n}s',
+
   // ===== Shortcuts hint (Settings bottom) =====
   'settings.shortcuts': 'Shortcuts: B Brush | 1234567890-= Colors & Clear',
 

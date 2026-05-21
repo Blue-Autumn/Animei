@@ -109,9 +109,23 @@
             <div class="tl-actions">
               <button class="pane-btn wide tl-btn" @click="onNew">新建</button>
               <button class="pane-btn wide tl-btn" @click="onSaveAsNew">从当前新建</button>
-              <button class="pane-btn wide tl-btn" :class="{ disabled: !currentDocId }" @click="onSave">
-                {{ currentDocId ? '保存当前 (Ctrl+S)' : '保存当前' }}
+              <button class="pane-btn wide tl-btn" @click="onSave">
+                保存当前 (Ctrl+S)
               </button>
+            </div>
+
+            <!-- 云端同步 -->
+            <div class="sync-bar">
+              <button class="pane-btn sync-btn" :disabled="syncLoading" @click="onPushTL" title="分析差异后推送到云">
+                <span>⬆</span>
+                <span>推送</span>
+              </button>
+              <button class="pane-btn sync-btn" :disabled="syncLoading" @click="onPullTL" title="分析差异后拉取到本地">
+                <span>⬇</span>
+                <span>拉取</span>
+              </button>
+              <span v-if="tlSyncMsg" class="sync-msg">{{ tlSyncMsg }}</span>
+              <span v-if="syncLoading" class="sync-msg">⏳...</span>
             </div>
 
             <!-- 存档列表 -->
@@ -133,12 +147,49 @@
                   <template v-if="tl.createdAt">
                     · {{ formatDateShort(tl.createdAt) }}
                   </template>
+                  <span
+                    v-if="getSyncBadgeLabel(tl)"
+                    class="sync-badge tl-sync-badge"
+                    :class="getSyncBadgeClass(tl)"
+                  >{{ getSyncBadgeLabel(tl) }}</span>
                 </div>
               </div>
               <button
                 class="tl-item-del"
                 @click.stop="onDelete(tl.id)"
                 title="删除"
+              >✕</button>
+            </div>
+
+            <!-- 云端文件管理 -->
+            <div class="tl-section-title" style="margin-top:20px">
+              云端文件
+              <button class="pane-btn sync-btn" style="margin-left:8px;font-size:10px;padding:2px 8px" @click="refreshCloudList" :disabled="cloudLoading">
+                {{ cloudLoading ? '⏳' : '🔄' }} 刷新
+              </button>
+            </div>
+            <div v-if="cloudTimelines.length === 0 && !cloudLoading" class="tl-empty">
+              云端暂无文件
+            </div>
+            <div
+              v-for="cloudTl in cloudTimelines"
+              :key="'cld-'+cloudTl.id"
+              class="tl-item cloud-item"
+            >
+              <div class="tl-item-left" @click="onViewCloud(cloudTl)" title="查看差异">
+                <div class="tl-item-name">{{ cloudTl.name }}</div>
+                <div class="tl-item-meta">
+                  {{ countTimelineColors(cloudTl) }}天
+                  <template v-if="cloudTl.updatedAt">
+                    · {{ formatDateShort(cloudTl.updatedAt) }}
+                  </template>
+                  <span class="sync-badge tl-sync-badge cloud-badge">☁️ 云端</span>
+                </div>
+              </div>
+              <button
+                class="tl-item-del cloud-del"
+                @click.stop="onDeleteCloud(cloudTl.id)"
+                title="从云端删除"
               >✕</button>
             </div>
           </div>
@@ -164,6 +215,44 @@
                     :value="locale"
                   >{{ name }}</option>
                 </select>
+              </div>
+            </div>
+
+            <!-- 身份/设备名称 -->
+            <div class="setting-row">
+              <label class="setting-label">{{ t('settings.identity') }}</label>
+              <div class="setting-control">
+                <input
+                  class="setting-input identity-input"
+                  type="text"
+                  :value="identityName"
+                  @input="onIdentityNameInput"
+                  @blur="onIdentityNameBlur"
+                  maxlength="30"
+                  placeholder="未命名设备"
+                />
+                <button
+                  class="reset-btn identity-reset-btn"
+                  @click="onIdentityReset"
+                  :title="t('settings.identityReset')"
+                >{{ t('settings.identityReset') }}</button>
+              </div>
+            </div>
+
+            <!-- 云端刷新间隔 -->
+            <div class="setting-row">
+              <label class="setting-label">{{ t('settings.pollInterval') }}</label>
+              <div class="setting-control poll-control">
+                <input
+                  class="poll-slider"
+                  type="range"
+                  :min="5"
+                  :max="300"
+                  :step="5"
+                  :value="pollIntervalSec"
+                  @input="onPollIntervalChange"
+                />
+                <span class="setting-value poll-value">{{ pollIntervalSec === 0 ? '暂停' : t('settings.pollEvery', { n: pollIntervalSec }) }}</span>
               </div>
             </div>
 
@@ -307,16 +396,34 @@
       :buttons="dialogState.buttons"
       @cancel="dialogState = null"
     />
+
+    <!-- Sync Preview Dialog -->
+    <SyncPreviewDialog
+      v-if="syncDialog"
+      :is-push="syncDialog.isPush"
+      :items="syncDialog.items"
+      @cancel="syncDialog = null"
+      @confirm="onSyncConfirm"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, watch, nextTick } from 'vue'
+import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from '../locales/index.js'
 import HslPicker from './HslPicker.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { themes, updateColor, renameTheme } from '../utils/paletteStore.js'
 import { loadTimelines, deleteTimeline } from '../utils/timelineStore.js'
+import SyncPreviewDialog from './SyncPreviewDialog.vue'
+import {
+  fetchCloudTimelines, pushTimelinesToCloud,
+  analyzePushDiff, analyzePullDiff,
+  mergeCloudToLocal, getTimelineSyncState, SYNC_STATE,
+  deleteCloudTimeline
+} from '../utils/syncStore.js'
+import { markSynced, replaceAll } from '../utils/timelineStore.js'
+import { identity, setIdentityName } from '../utils/identity.js'
 
 const { t, setLocale, localeNames } = useI18n()
 
@@ -384,6 +491,66 @@ function onLangChange(e) {
   localSettings.locale = val
   setLocale(val)
   emitSettings({ locale: val })
+}
+
+// ── Identity ──
+const identityName = ref(identity.name)
+
+function onIdentityNameInput(e) {
+  identityName.value = e.target.value
+}
+
+function onIdentityNameBlur() {
+  const name = identityName.value.trim()
+  if (name && name !== identity.name) {
+    setIdentityName(name)
+    identityName.value = name
+  } else if (!name) {
+    // 不允许空名，恢复
+    identityName.value = identity.name
+  }
+}
+
+function onIdentityReset() {
+  dialogState.value = {
+    title: t('settings.identityResetTitle'),
+    message: t('settings.identityResetMsg'),
+    buttons: [
+      {
+        label: '取消',
+        class: '',
+        action: () => { dialogState.value = null }
+      },
+      {
+        label: '确定重置',
+        class: 'danger',
+        action: () => {
+          // 重新生成身份
+          const newIdentity = {
+            id: 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            name: '未命名设备',
+            createdAt: new Date().toISOString(),
+            version: 1
+          }
+          localStorage.setItem('animei_identity', JSON.stringify(newIdentity))
+          // 更新 identity 模块内部
+          Object.assign(identity, newIdentity)
+          identityName.value = newIdentity.name
+          dialogState.value = null
+          tlSyncMsg.value = t('settings.identityResetDone')
+          setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+        }
+      }
+    ]
+  }
+}
+
+const pollIntervalSec = ref(Math.round(60)) // 默认 60s
+function onPollIntervalChange(e) {
+  const sec = parseInt(e.target.value, 10)
+  pollIntervalSec.value = sec
+  pollInterval.value = sec * 1000
+  schedulePoll()
 }
 
 // ── Cell size ──
@@ -506,12 +673,8 @@ function onSaveAsNew() {
   emit('save-as-new', name.trim())
 }
 
-// 保存
+// 保存（无关联时 App.vue 会自动弹命名框 → 创建 → 关联）
 function onSave() {
-  if (!props.currentDocId) {
-    alert('当前未关联存档，请使用"从当前新建"创建存档')
-    return
-  }
   emit('save')
 }
 
@@ -618,6 +781,216 @@ const editingColorIdx = ref(-1)    // which color index in that theme
 const editingNameIdx = ref(-1)     // which theme name is being renamed
 const syncMsg = ref('')
 
+// ── Timeline sync ──
+const syncDialog = ref(null) // null | { isPush, items }
+const syncLoading = ref(false)
+const tlSyncMsg = ref('')
+
+// ── 云端文件管理 ──
+const cloudTimelines = ref([])
+const cloudLoading = ref(false)
+
+// ── 自适应轮询（Tab 激活/失焦感知）──
+const pollInterval = ref(60_000) // ms，默认 60s
+let pollTimer = null
+
+function schedulePoll() {
+  clearTimeout(pollTimer)
+  if (pollInterval.value <= 0) return
+  pollTimer = setTimeout(async () => {
+    if (!props.open) { schedulePoll(); return }  // 面板关闭，不请求
+    if (document.hidden) { schedulePoll(); return } // 浏览器 tab 隐藏，跳过
+    await refreshCloudList()
+    schedulePoll()
+  }, pollInterval.value)
+}
+
+function adjustPollInterval() {
+  if (!props.open || document.hidden) {
+    pollInterval.value = 0 // 暂停
+  } else if (activeTab.value === 2) {
+    pollInterval.value = 10_000 // 时间表 tab：10s
+  } else {
+    pollInterval.value = 60_000 // 其他 tab：60s
+  }
+  schedulePoll()
+}
+
+// 监听面板打开/关闭
+watch(() => props.open, adjustPollInterval)
+// 监听 tab 切换
+watch(activeTab, adjustPollInterval)
+watch(activeTab, (tab) => {
+  if (tab === 2) refreshCloudList()
+})
+// 监听浏览器标签页可见性
+function onVisibilityChange() {
+  adjustPollInterval()
+}
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  refreshCloudList()
+  schedulePoll()
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(pollTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
+
+async function refreshCloudList() {
+  cloudLoading.value = true
+  try {
+    const { timelines } = await fetchCloudTimelines({ all: true })
+    cloudTimelines.value = timelines
+  } catch (e) {
+    console.error('获取云端列表失败:', e)
+  } finally {
+    cloudLoading.value = false
+  }
+}
+
+async function onDeleteCloud(id) {
+  try {
+    await deleteCloudTimeline(id)
+    cloudTimelines.value = cloudTimelines.value.filter(t => t.id !== id)
+  } catch (e) {
+    console.error('删除云端记录失败:', e)
+  }
+}
+
+// 查看云端某条详情（拉取单条对比）
+function onViewCloud(tl) {
+  const localList = localTimelines.value
+  const diff = analyzePullDiff(localList, [tl])
+  if (diff.length > 0) {
+    syncDialog.value = { isPush: false, items: diff }
+  }
+}
+
+// 一键拉取到本地
+async function onPullSingle(tl) {
+  try {
+    let newList = loadTimelines()
+    newList = mergeCloudToLocal(newList, tl)
+    replaceAll(newList)
+    localTimelines.value = loadTimelines()
+  } catch (e) {
+    console.error('拉取失败:', e)
+  }
+}
+
+async function onPushTL() {
+  syncLoading.value = true
+  tlSyncMsg.value = ''
+  try {
+    const localList = localTimelines.value
+    const { timelines: cloudList } = await fetchCloudTimelines()
+    const diff = analyzePushDiff(localList, cloudList)
+    const actionable = diff.filter(d => d.action !== 'unchanged')
+    if (actionable.length === 0) {
+      tlSyncMsg.value = '所有时间表已是最新，无需推送。'
+      setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+      return
+    }
+    syncDialog.value = { isPush: true, items: diff }
+  } catch (e) {
+    console.error('推送分析失败:', e)
+    tlSyncMsg.value = '❌ 无法连接服务器'
+    setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+async function onPullTL() {
+  syncLoading.value = true
+  tlSyncMsg.value = ''
+  try {
+    const localList = localTimelines.value
+    const { timelines: cloudList } = await fetchCloudTimelines({ all: true })
+    const diff = analyzePullDiff(localList, cloudList)
+    if (diff.length === 0) {
+      tlSyncMsg.value = '所有时间表已是最新，无需拉取。'
+      setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+      return
+    }
+    syncDialog.value = { isPush: false, items: diff }
+  } catch (e) {
+    console.error('拉取分析失败:', e)
+    tlSyncMsg.value = '❌ 无法连接服务器'
+    setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+async function onSyncConfirm(selected) {
+  if (syncDialog.value.isPush) {
+    // ── 推送 ──
+    try {
+      const localList = localTimelines.value
+      const { timelines: cloudList } = await fetchCloudTimelines()
+      // 用选中的本地时间表替换云端对应位置
+      const cloudMap = new Map()
+      for (const c of cloudList) cloudMap.set(c.id, c)
+
+      for (const { tl, action } of selected) {
+        if (action === 'create') {
+          cloudMap.set(tl.id, tl)
+        } else if (action === 'update') {
+          cloudMap.set(tl.id, tl)
+        }
+      }
+      const newCloudList = Array.from(cloudMap.values())
+
+      await pushTimelinesToCloud(newCloudList)
+
+      // 标记已同步
+      for (const { tl } of selected) {
+        markSynced(tl.id)
+      }
+
+      // 刷新本地列表
+      localTimelines.value = loadTimelines()
+      tlSyncMsg.value = '✅ 推送成功'
+      setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+    } catch (e) {
+      console.error('推送失败:', e)
+      tlSyncMsg.value = '❌ 推送失败'
+      setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+    }
+  } else {
+    // ── 拉取 ──
+    try {
+      let newList = loadTimelines()
+
+      for (const { tl } of selected) {
+        newList = mergeCloudToLocal(newList, tl)
+      }
+
+      // 全量替换
+      replaceAll(newList)
+      localTimelines.value = loadTimelines()
+
+      // 如果当前正在编辑的时间表被更新，通知父组件刷新
+      const currentId = props.currentDocId
+      if (currentId && selected.some(s => s.tl.id === currentId)) {
+        emit('load-timeline', currentId)
+      }
+
+      tlSyncMsg.value = '✅ 拉取成功'
+      setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+    } catch (e) {
+      console.error('拉取失败:', e)
+      tlSyncMsg.value = '❌ 拉取失败'
+      setTimeout(() => { tlSyncMsg.value = '' }, 3000)
+    }
+  }
+  syncDialog.value = null
+}
+
 function selectSwatch(tIdx, cIdx) {
   if (cIdx === -1) {
     // 橡皮擦 — 不用编辑
@@ -697,6 +1070,27 @@ async function pullFromServer() {
     syncMsg.value = '❌ 无法连接服务器'
   }
   setTimeout(() => { syncMsg.value = '' }, 3000)
+}
+
+// ── Sync badge helpers（需要云端数据参与比对）──
+function getSyncBadgeLabel(tl) {
+  const cloud = cloudTimelines.value.find(c => c.id === tl.id)
+  const state = getTimelineSyncState(tl, cloud || null)
+  switch (state) {
+    case 'synced':      return '✅ 已同步'
+    case 'local-newer': return '⬆ 待推送'
+    case 'cloud-newer': return '⬇ 待拉取'
+    case 'local-only':  return '☁ 仅本地'
+    case 'cloud-only':  return '🔵 仅云端'
+    case 'conflict':    return '⚠ 冲突'
+    default:            return ''
+  }
+}
+
+function getSyncBadgeClass(tl) {
+  const cloud = cloudTimelines.value.find(c => c.id === tl.id)
+  const state = getTimelineSyncState(tl, cloud || null)
+  return 'sync-' + state
 }
 
 // ── Custom directive: v-focus ──
@@ -1015,6 +1409,50 @@ const vFocus = {
 .tl-item-del:hover {
   background: rgba(255, 80, 80, 0.15);
   color: #ff5555;
+}
+
+.tl-sync-badge {
+  margin-left: 6px;
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.tl-sync-badge.sync-synced {
+  background: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+}
+
+.tl-sync-badge.sync-local-newer {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
+}
+
+.tl-sync-badge.sync-cloud-newer {
+  background: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+}
+
+.tl-sync-badge.sync-local-only {
+  background: rgba(200, 200, 200, 0.15);
+  color: rgba(200, 200, 200, 0.7);
+}
+
+.tl-sync-badge.sync-cloud-only {
+  background: rgba(155, 89, 182, 0.12);
+  color: #9b59b6;
+}
+
+.tl-sync-badge.sync-conflict {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
+}
+
+.tl-sync-badge.unsynced {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
 }
 
 /* ── Settings tab ── */

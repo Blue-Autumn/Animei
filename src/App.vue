@@ -237,6 +237,22 @@
       @load-timeline="doLoadTimeline"
       @delete-timeline="doDeleteTimeline"
     />
+
+    <!-- Sync Preview Dialog -->
+    <SyncPreviewDialog
+      v-if="syncDialog"
+      :key="`sync-${syncDialog.isPush ? 'push' : 'pull'}-${syncDialog.items?.length || 0}`"
+      :is-push="syncDialog.isPush"
+      :items="syncDialog.items"
+      @cancel="syncDialog = null"
+      @confirm="onSyncConfirm"
+    />
+
+    <!-- Identity Setup (首次使用霸屏) -->
+    <IdentitySetup
+      v-if="showIdentitySetup"
+      @done="onIdentityDone"
+    />
   </div>
 </template>
 
@@ -246,6 +262,8 @@ import WeekGrid from './components/WeekGrid.vue'
 import MonthGrid from './components/MonthGrid.vue'
 import BrushToolbar from './components/BrushToolbar.vue'
 import SidePanel from './components/SidePanel.vue'
+import SyncPreviewDialog from './components/SyncPreviewDialog.vue'
+import IdentitySetup from './components/IdentitySetup.vue'
 import { loadColors, setColor, setColors, saveColors } from './utils/storage.js'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './utils/settings.js'
 import { themes, getTheme } from './utils/paletteStore.js'
@@ -258,6 +276,12 @@ import {
   getTimeline
 } from './utils/timelineStore.js'
 import { useI18n } from './locales/index.js'
+import { isIdentitySet } from './utils/identity.js'
+import {
+  computeTimelineDiff,
+  executeTimelinePush,
+  executeTimelinePull
+} from './utils/syncStore.js'
 
 const { t, setLocale } = useI18n()
 
@@ -544,8 +568,22 @@ function onSetTheme(themeIndex) {
 
 // ── Timeline (多时间表管理) ──
 const timelines = ref(loadTimelines())
-const currentDocId = ref(null)   // 当前关联的存档ID，null=未关联
+
+// 从 localStorage 恢复 currentDocId，确保刷新页面后关联不丢失
+const savedId = localStorage.getItem('animei_current_doc_id')
+const currentDocId = ref(savedId && getTimeline(savedId) ? savedId : null)
 const isDirty = ref(false)      // 是否有未保存修改
+
+// 如果画布有数据但没有关联存档 → 标记为未保存（防止刷新后丢失识别）
+if (!currentDocId.value && Object.keys(colors.value).length > 0) {
+  isDirty.value = true
+}
+
+// currentDocId 变化时自动持久化
+watch(currentDocId, (id) => {
+  if (id) localStorage.setItem('animei_current_doc_id', id)
+  else localStorage.removeItem('animei_current_doc_id')
+})
 
 // 注意：isDirty 不在这里自动设为 true；改为在 onColorDate / onPaintBatch 中手动设置
 // 可防止加载存档/新建时异步 watch 覆盖掉 isDirty = false
@@ -580,10 +618,16 @@ function doSaveAsNew(name) {
   return doc
 }
 
-// 保存到当前关联存档
+// 保存到当前关联存档（无关联时自动转为"从当前新建"）
 function doSave() {
-  if (!currentDocId.value) return false
-  updateTimeline(currentDocId.value, colors.value)
+  if (!currentDocId.value) {
+    const name = prompt('请输入时间表名称：', '我的时间表')
+    if (!name || !name.trim()) return false
+    const doc = createTimeline(name.trim(), colors.value)
+    currentDocId.value = doc.id
+  } else {
+    updateTimeline(currentDocId.value, colors.value)
+  }
   isDirty.value = false
   refreshTimelines()
   return true
@@ -673,6 +717,75 @@ function onKeydown(e) {
       return
     }
   }
+}
+
+// ── Identity Setup ──
+const showIdentitySetup = ref(!isIdentitySet())
+
+function onIdentityDone() {
+  showIdentitySetup.value = false
+}
+
+// ── Sync (云端同步) ──
+const syncDialog = ref(null)
+const syncLoading = ref(false)
+
+/**
+ * 发起同步预览
+ * @param {'push'|'pull'} direction
+ */
+async function startSync(direction) {
+  if (!currentDocId.value) {
+    alert(t('sync.needDoc'))
+    return
+  }
+  syncLoading.value = true
+  try {
+    const result = await computeTimelineDiff(currentDocId.value, direction)
+    syncDialog.value = {
+      direction,
+      ...result
+    }
+  } catch (e) {
+    alert(e.message || t('sync.networkError'))
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+/**
+ * 用户确认同步（由 SyncPreviewDialog emit 触发）
+ * @param {Array} selected 用户勾选的要同步的条目列表
+ */
+async function onSyncConfirm(selected) {
+  if (!currentDocId.value || !syncDialog.value) return
+  syncLoading.value = true
+  try {
+    if (syncDialog.value.isPush) {
+      await executeTimelinePush(currentDocId.value, selected)
+    } else {
+      const updated = await executeTimelinePull(currentDocId.value, selected)
+      // 将拉取结果应用到画布
+      if (updated && updated.colors) {
+        colors.value = { ...updated.colors }
+        saveColors(colors.value)
+      }
+    }
+    // 刷新本地时间表列表
+    refreshTimelines()
+    // 关闭弹窗
+    syncDialog.value = null
+    isDirty.value = false
+  } catch (e) {
+    alert(e.message || t('sync.networkError'))
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+// 将同步相关方法暴露给 SidePanel
+function getSyncMethods() {
+  return { startSync, syncLoading }
 }
 
 // ── Lifecycle ──

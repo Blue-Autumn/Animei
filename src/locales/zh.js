@@ -73,6 +73,18 @@ export default {
   // ===== 侧边栏 =====
   'settings.sideBlur': '侧边栏模糊',
 
+  // ===== 身份/设备 =====
+  'settings.identity': '设备名称',
+  'settings.identityReset': '重置',
+  'settings.identityResetTitle': '重置身份',
+  'settings.identityResetMsg': '重置后将生成新的设备标识，云端数据不会丢失，但需要重新关联。确定继续吗？',
+  'settings.identityResetDone': '身份已重置',
+
+  // ===== 云端轮询 =====
+  'settings.pollInterval': '云端刷新间隔',
+  'settings.pollIntervalUnit': '秒',
+  'settings.pollEvery': '每 {n} 秒',
+
   // ===== 快捷键提示（设置底部） =====
   'settings.shortcuts': '快捷键: B 笔刷开关 | 1234567890-= 选色',
 
